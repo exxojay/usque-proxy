@@ -13,9 +13,7 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "com.nhubaotruong.usqueproxy"
     compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
+        version = release(37)
     }
 
     defaultConfig {
