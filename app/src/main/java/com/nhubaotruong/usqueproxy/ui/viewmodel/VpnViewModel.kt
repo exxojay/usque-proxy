@@ -35,8 +35,40 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = VpnPreferences(application)
     private val appRepo = AppRepository(application)
 
+    val vpnPrefs: StateFlow<VpnPrefs> = prefs.prefsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), VpnPrefs())
+
+    private val _vpnState = MutableStateFlow(VpnState.DISCONNECTED)
+    val vpnState: StateFlow<VpnState> = _vpnState.asStateFlow()
+
+    private val _stats = MutableStateFlow(TunnelStats())
+    val stats: StateFlow<TunnelStats> = _stats.asStateFlow()
+
+    private val _connectedSince = MutableStateFlow<Long?>(null)
+    val connectedSince: StateFlow<Long?> = _connectedSince.asStateFlow()
+
+    private val _installedApps = MutableStateFlow<List<AppInfo>>(emptyList())
+    val installedApps: StateFlow<List<AppInfo>> = _installedApps.asStateFlow()
+
+    private val _registerError = MutableStateFlow<String?>(null)
+    val registerError: StateFlow<String?> = _registerError.asStateFlow()
+
+    private val _isRegistering = MutableStateFlow(false)
+    val isRegistering: StateFlow<Boolean> = _isRegistering.asStateFlow()
+
+    private val _needsRestart = MutableStateFlow(false)
+    val needsRestart: StateFlow<Boolean> = _needsRestart.asStateFlow()
+
+    private val _tunnelError = MutableStateFlow<String?>(null)
+    val tunnelError: StateFlow<String?> = _tunnelError.asStateFlow()
+
     init {
         // Collect VPN service events for instant state updates (no polling needed).
+        // Declared AFTER the MutableStateFlow properties: viewModelScope uses
+        // Dispatchers.Main.immediate, so the collector can run synchronously during
+        // construction, and the replay=1 SharedFlow delivers the last pending event
+        // (e.g. a Stats event while the tunnel is running). Touching uninitialized
+        // fields here would NPE on every app open.
         viewModelScope.launch {
             TunnelStateHolder.events.collect { event ->
                 when (event) {
@@ -67,33 +99,6 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
-    val vpnPrefs: StateFlow<VpnPrefs> = prefs.prefsFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), VpnPrefs())
-
-    private val _vpnState = MutableStateFlow(VpnState.DISCONNECTED)
-    val vpnState: StateFlow<VpnState> = _vpnState.asStateFlow()
-
-    private val _stats = MutableStateFlow(TunnelStats())
-    val stats: StateFlow<TunnelStats> = _stats.asStateFlow()
-
-    private val _connectedSince = MutableStateFlow<Long?>(null)
-    val connectedSince: StateFlow<Long?> = _connectedSince.asStateFlow()
-
-    private val _installedApps = MutableStateFlow<List<AppInfo>>(emptyList())
-    val installedApps: StateFlow<List<AppInfo>> = _installedApps.asStateFlow()
-
-    private val _registerError = MutableStateFlow<String?>(null)
-    val registerError: StateFlow<String?> = _registerError.asStateFlow()
-
-    private val _isRegistering = MutableStateFlow(false)
-    val isRegistering: StateFlow<Boolean> = _isRegistering.asStateFlow()
-
-    private val _needsRestart = MutableStateFlow(false)
-    val needsRestart: StateFlow<Boolean> = _needsRestart.asStateFlow()
-
-    private val _tunnelError = MutableStateFlow<String?>(null)
-    val tunnelError: StateFlow<String?> = _tunnelError.asStateFlow()
     fun clearTunnelError() { _tunnelError.value = null }
 
     companion object {
