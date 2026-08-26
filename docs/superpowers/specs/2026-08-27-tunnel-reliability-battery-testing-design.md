@@ -40,11 +40,13 @@ Current problems identified during research:
 - `gvisor.dev/gvisor`, `golang.zx2c4.com/wireguard`, `golang.org/x/net` → latest stable/commit as applicable
 - Indirect deps follow `go get -u` resolution
 - **JNI surface verified unchanged** after rebuild (`startTunnel`, `getStats`, `reconnect`, `setConnectivity`, register functions)
+- **quic-go migration risk**: quic-go makes breaking API changes between minor versions. After updating, run `go build` in `usque-bind/` first — if it fails, pin quic-go back to v0.59.0 and document why
+- **CI gomobile pin**: `.github/workflows/release.yml` hardcodes gomobile at `v0.0.0-20260410095206-2cfb76559b7b` — update it to match the new `golang.org/x/mobile` version in go.mod
 
 ### Android (`gradle/libs.versions.toml`)
 
 - Check for newer: Compose BOM (2026.04.01), Navigation (2.9.8), Lifecycle (2.10.0), core-ktx (1.18.0), activity-compose (1.13.0), datastore (1.2.1)
-- **Replace `accompanist-drawablepainter`** (deprecated, accompanist winding down) with the native Compose drawable API if the Compose version supports it; else keep pinned. Small usage (likely one call site).
+- **`accompanist-drawablepainter` stays pinned** — `DrawablePainter` was not promoted to standard Compose; accompanist remains the canonical way to render Android `Drawable` in Compose. Noted as future cleanup, does not block the dep pass.
 
 ### Rebuild & verify
 
@@ -80,6 +82,7 @@ Current problems identified during research:
 
 - **gomobile callback threading**: Go callbacks into Java arrive on arbitrary goroutine threads. `tryEmit` on `MutableSharedFlow` is thread-safe — verify in practice.
 - **Stats push frequency**: never per-packet/per-second; state change + ~5 min periodic summary only.
+- **Stats JSON schema stability**: the `getStats()` JSON shape (`connected`, `running`, `rx_bytes`, `tx_bytes`, `has_network`, `last_error`) must remain stable after the usque update — Kotlin parsing (dead-man's switch, ViewModel stats display) breaks silently if fields change. Verify schema unchanged or update Kotlin parsing in the same pass.
 
 ## 5. Section 3 — Battery
 
@@ -101,6 +104,7 @@ Current problems identified during research:
 
 - Navigation: Main → Settings → SplitTunnel, back stack, state restoration
 - Connect/disconnect flow with injected/fake service state
+  - State injection: UI tests manipulate `UsqueVpnService.isRunning` / `lastError` / `events` companion statics directly (simplest path for the minimal layer); if brittle, hoist state into `VpnViewModel` constructor injection in a future refactor
 - Error banner (RestartBanner)
 - Settings toggles persist
 - Split-tunnel include/exclude
@@ -151,3 +155,4 @@ Current problems identified during research:
 - [ ] Compose UI tests + instrumentation tests pass on emulator
 - [ ] Manual QA plan document written
 - [ ] CLAUDE.md reflects actual versions
+- [ ] `getStats()` JSON schema verified unchanged after dep update (or Kotlin parsing updated in the same pass)
