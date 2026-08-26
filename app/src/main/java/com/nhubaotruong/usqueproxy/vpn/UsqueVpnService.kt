@@ -489,17 +489,19 @@ class UsqueVpnService : VpnService(), TunnelListener {
     // --- TunnelListener (called from the Go tunnel goroutine) ---
 
     override fun onStateChanged(state: String) {
-        when (state) {
-            "connecting" -> TunnelStateHolder.emit(VpnServiceEvent.Connecting)
-            "connected" -> {
-                TunnelStateHolder.emit(VpnServiceEvent.Started)
+        when (val event = ListenerEventMapper.mapState(state)) {
+            VpnServiceEvent.Connecting -> TunnelStateHolder.emit(event)
+            VpnServiceEvent.Started -> {
+                TunnelStateHolder.emit(event)
                 notification.showConnected()
             }
-            "disconnected" -> TunnelStateHolder.emit(VpnServiceEvent.Disconnecting)
-            "stopped" -> {
-                TunnelStateHolder.emit(VpnServiceEvent.Stopped)
+            VpnServiceEvent.Disconnecting -> TunnelStateHolder.emit(event)
+            VpnServiceEvent.Stopped -> {
+                TunnelStateHolder.emit(event)
                 notification.cancel()
             }
+            null -> Unit
+            else -> Unit
         }
     }
 
@@ -509,8 +511,10 @@ class UsqueVpnService : VpnService(), TunnelListener {
 
     override fun onError(err: String) {
         TunnelStateHolder.lastError = err
-        TunnelStateHolder.emit(VpnServiceEvent.Error(err))
-        notification.showError(err)
+        ListenerEventMapper.mapError(err)?.let { event ->
+            TunnelStateHolder.emit(event)
+            notification.showError(err)
+        }
     }
 
     private fun restartTunnel() {
