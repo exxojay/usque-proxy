@@ -81,6 +81,7 @@ Current problems identified during research:
 ### Refactor scope (user mandate: no legacy, no compatibility)
 
 **Go (`usque-bind/bind.go`):**
+
 - Add `TunnelListener` interface (`OnStateChanged`, `OnStats`, `OnError`)
 - Change `StartTunnel` signature to accept `listener TunnelListener` directly
 - Add callback points in the tunnel loop: on connect, on disconnect, on fatal error, periodic stats tick (~5 min)
@@ -88,6 +89,7 @@ Current problems identified during research:
 - Keep `waitForNetwork` (already event-driven), `KeepAlivePeriod: 30s` (deliberate tradeoff)
 
 **Kotlin (`UsqueVpnService.kt` — 846 lines, split it):**
+
 - Delete `startWatchdog()` entirely (the 60s polling loop)
 - Implement `TunnelListener` → map callbacks to `_events.tryEmit()` + notification updates
 - Add a dead-man's switch: one coroutine, 15–30 min sleep (60 min power-save), single `getStats()` check
@@ -160,6 +162,7 @@ Current problems identified during research:
 ### Expanded testing scenarios
 
 **Network transitions:**
+
 - WiFi → cellular: graceful handoff, no 30s+ gap
 - Cellular → WiFi: reconnect within 5s
 - Airplane mode on → off: tunnel resumes
@@ -167,6 +170,7 @@ Current problems identified during research:
 - Dual SIM switch (if applicable)
 
 **Lifecycle edge cases:**
+
 - Screen off + backgrounded 1h → reconnect on wake
 - Process killed by OOM killer → START_STICKY restore
 - Deep Doze (force-idle 30 min) → no crash, reconnect on exit
@@ -175,17 +179,20 @@ Current problems identified during research:
 - Quick Settings tile toggle during connecting state (race)
 
 **Long-run soak:**
+
 - 24h connected, idle: no silent death, battery <5%
 - 72h connected with periodic traffic: stats accuracy, no fd leak, no memory growth
 - 100 connect/disconnect cycles: no fd/wakelock leak, no ANR
 
 **DNS scenarios:**
+
 - Private DNS on → tunnel DNS interception behavior
 - Private DNS off → system DNS forwarding
 - DoH/DoQ modes → resolution + fallback
 - DNS over VPN when split-tunnel excludes the VPN app itself
 
 **Split tunnel:**
+
 - Include mode: only specified apps through VPN
 - Exclude mode: specified apps bypass VPN, including self
 - App uninstalled while in split-tunnel list → graceful handling
