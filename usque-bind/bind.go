@@ -607,6 +607,7 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 			}
 			if tcpEndpoint == nil {
 				lastError.Store("no valid endpoints for HTTP/2")
+				notifyError("no valid endpoints for HTTP/2")
 				log.Println("no valid endpoints for HTTP/2")
 				sleepCtx(ctx, reconnectDelay)
 				continue
@@ -942,7 +943,6 @@ func connectTunnelProtectedH2(
 	return ipConn, rsp, nil
 }
 
-// isDNSQuery reports whether pkt looks like a DNS query (QR=0, opcode=0, QDCOUNT>=1).
 // isDNSQuery reports whether pkt looks like a DNS query (QR=0, opcode=0, QDCOUNT>=1).
 func isDNSQuery(pkt []byte) bool {
 	if len(pkt) < 12 {
