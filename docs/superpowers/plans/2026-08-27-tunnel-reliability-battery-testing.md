@@ -394,6 +394,8 @@
   }
   ```
 
+  In the teardown (after `maintainTunnel` returns, before `close(done)`), add `notifyState("stopped")` so Kotlin always learns the tunnel ended (the ViewModel's `Stopped` handler depends on it).
+
 - [ ] **Step 5: Add callback points in maintainTunnel**
   In `maintainTunnel` (line 378), at the exact existing anchors:
   - Before the dial attempt (where `connectCount.Add(1)` is, line 508): `notifyState("connecting")`
