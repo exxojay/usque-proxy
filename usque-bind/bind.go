@@ -62,13 +62,13 @@ type connResult struct {
 // tunnelConfig extends config.Config with optional tunnel parameters.
 type tunnelConfig struct {
 	config.Config
-	SNI         string   `json:"sni"`
-	ConnectURI  string   `json:"connect_uri"`
-	DoHURL      string   `json:"doh_url"`
-	DoQURL      string   `json:"doq_url"`
-	SystemDNS      []string `json:"system_dns"`
-	PrivateDNS     bool     `json:"private_dns_active"`
-	UseHTTP2       bool     `json:"use_http2"`
+	SNI        string   `json:"sni"`
+	ConnectURI string   `json:"connect_uri"`
+	DoHURL     string   `json:"doh_url"`
+	DoQURL     string   `json:"doq_url"`
+	SystemDNS  []string `json:"system_dns"`
+	PrivateDNS bool     `json:"private_dns_active"`
+	UseHTTP2   bool     `json:"use_http2"`
 }
 
 func (t *tunnelConfig) sni() string {
@@ -174,17 +174,17 @@ var dnsQueryPool = sync.Pool{
 
 // tunnel state
 var (
-	mu          sync.Mutex
-	cancel      context.CancelFunc
-	running     atomic.Bool
-	connected   atomic.Bool  // true when MASQUE tunnel is forwarding traffic
-	done        chan struct{} // closed when maintainTunnel returns
-	reconnectCh chan struct{}
-	networkCh   chan struct{} // signaled by SetConnectivity(true) to wake waitForNetwork
-	startTime   time.Time
-	connectedAt atomic.Int64 // unix millis when last connected (0 if not connected)
-	txBytes     atomic.Int64
-	rxBytes     atomic.Int64
+	mu           sync.Mutex
+	cancel       context.CancelFunc
+	running      atomic.Bool
+	connected    atomic.Bool   // true when MASQUE tunnel is forwarding traffic
+	done         chan struct{} // closed when maintainTunnel returns
+	reconnectCh  chan struct{}
+	networkCh    chan struct{} // signaled by SetConnectivity(true) to wake waitForNetwork
+	startTime    time.Time
+	connectedAt  atomic.Int64 // unix millis when last connected (0 if not connected)
+	txBytes      atomic.Int64
+	rxBytes      atomic.Int64
 	lastError    atomic.Value // string: last connection error message
 	hasNetwork   atomic.Bool  // set by Android via SetConnectivity
 	connectCount atomic.Int64 // number of connection attempts since StartTunnel
@@ -297,13 +297,13 @@ func IsRunning() bool {
 // GetStats returns JSON with tunnel statistics.
 func GetStats() string {
 	stats := map[string]interface{}{
-		"running":    running.Load(),
-		"connected":  connected.Load(),
-		"tx_bytes":   txBytes.Load(),
-		"rx_bytes":   rxBytes.Load(),
-		"uptime_sec": 0,
-		"has_network":    hasNetwork.Load(),
-		"connect_count":  connectCount.Load(),
+		"running":       running.Load(),
+		"connected":     connected.Load(),
+		"tx_bytes":      txBytes.Load(),
+		"rx_bytes":      rxBytes.Load(),
+		"uptime_sec":    0,
+		"has_network":   hasNetwork.Load(),
+		"connect_count": connectCount.Load(),
 	}
 	if e, ok := lastError.Load().(string); ok && e != "" {
 		stats["last_error"] = e
@@ -497,8 +497,8 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 	// Certificate cache: generate once, reuse until near expiry.
 	var cachedCert [][]byte
 	var certExpiry time.Time
-	var waitForTraffic bool   // after error disconnect, wait for outbound traffic before reconnecting
-	var forcedReconnect bool  // true when reconnect was explicitly requested (skip backoff delay)
+	var waitForTraffic bool  // after error disconnect, wait for outbound traffic before reconnecting
+	var forcedReconnect bool // true when reconnect was explicitly requested (skip backoff delay)
 
 	// Stats ticker: one notifyStats() per ~5 min while connected. Created once
 	// (not per reconnect iteration) so reconnect cycles don't stack goroutines.
