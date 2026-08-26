@@ -93,6 +93,17 @@ Current problems identified during research:
 - Doze/power-save: keep idle-mode receiver; dead-man's switch extends in power-save; verify with `dumpsys deviceidle force-idle`.
 - **Verification (emulator proxies)**: `dumpsys batterystats` (wakelock time, wakeup count), `dumpsys alarm` (alarm count), logcat JNI-call frequency, before/after comparison. Real-device Battery Historian + mA numbers documented as manual steps.
 
+### Concrete battery targets (24h, `dumpsys batterystats`, API 35–36)
+
+| Metric | Current | Target (well-behaved VPN) | Reference |
+| --- | --- | --- | --- |
+| JNI `getStats()` calls/day | ~1,440 (60s poll) | **<100** (dead-man's switch only) | WireGuard: 0 (event-driven) |
+| Wakeup alarms/day | keepalive-dependent | **<50** | ~30–60 (keepalive only) |
+| Partial wakelock time/day | ~2–4 min (connect/reconnect) | **<5 min total** | <2 min if no reconnects |
+| Background CPU time/day | high (60s JNI + JSON parse) | **<60 s** (listener callbacks) | <30 s if stable |
+| Battery drain %/day | high (constant polling) | **<2% idle, <5% active** | 1–3% idle |
+| QUIC keepalive packets/day | ~2,880 (30s interval) | unchanged (deliberate tradeoff) | same — NAT survival |
+
 ## 6. Section 4 — Testing
 
 ### Minimal unit layer (the seam) — no mocking framework
@@ -127,17 +138,64 @@ Current problems identified during research:
 - Quick Settings tile
 - Boot auto-connect
 
-## 7. Section 5 — Execution Order
+### Expanded testing scenarios
+
+**Network transitions:**
+- WiFi → cellular: graceful handoff, no 30s+ gap
+- Cellular → WiFi: reconnect within 5s
+- Airplane mode on → off: tunnel resumes
+- Weak signal / high packet loss: QUIC recovers, no crash
+- Dual SIM switch (if applicable)
+
+**Lifecycle edge cases:**
+- Screen off + backgrounded 1h → reconnect on wake
+- Process killed by OOM killer → START_STICKY restore
+- Deep Doze (force-idle 30 min) → no crash, reconnect on exit
+- App Standby bucket downgrade → tunnel persists
+- Configuration change (rotation, theme) during connect
+- Quick Settings tile toggle during connecting state (race)
+
+**Long-run soak:**
+- 24h connected, idle: no silent death, battery <5%
+- 72h connected with periodic traffic: stats accuracy, no fd leak, no memory growth
+- 100 connect/disconnect cycles: no fd/wakelock leak, no ANR
+
+**DNS scenarios:**
+- Private DNS on → tunnel DNS interception behavior
+- Private DNS off → system DNS forwarding
+- DoH/DoQ modes → resolution + fallback
+- DNS over VPN when split-tunnel excludes the VPN app itself
+
+**Split tunnel:**
+- Include mode: only specified apps through VPN
+- Exclude mode: specified apps bypass VPN, including self
+- App uninstalled while in split-tunnel list → graceful handling
+- System apps in include list
+
+## 7. Section 5 — Compiler Tuning & Build Best Practices
+
+1. **R8 keep rules for gomobile JNI**: verify `proguard-rules.pro` keeps `usquebind.**` classes (`-keep class usquebind.** { *; }`) — R8 can strip JNI-bound classes
+2. **Baseline Profiles**: add `baseline-prof.txt` for the Kotlin side (Compose screens, ViewModel init) — 15–30% faster cold start
+3. **Go PGO**: ensure `build-usque.sh` passes `-pgo=default.pgo` to `gomobile bind` if `usque-bind/default.pgo` exists
+4. **Compose compiler reports**: enable `composeCompilerReports` for stability/performance metrics during development
+5. **Resource shrinking verification**: confirm `isShrinkResources = true` actually removes unused resources (`usage.txt`)
+6. **StrictMode in debug**: thread + VM policies to catch disk/network-on-main-thread violations early
+7. **Wakelock audit**: `adb shell dumpsys power | grep -A5 UsqueProxy` in QA checklist — no leaks across connect/disconnect cycles
+8. **ANR awareness**: `onStartCommand` must return within ~5s; document risk if `startVpn` blocks
+9. **Compose performance**: `derivedStateOf` for derived state; pipe `isRunning`/`lastError` through StateFlow, don't read statics in composables
+10. **TUN fd lifecycle**: ensure `vpnInterface?.close()` in `stopVpnInternal` and `onDestroy` — fd leaks cause 'too many open files'
+
+## 8. Section 6 — Execution Order
 
 - **Phase 0 — Baseline**: build AAR + app, emulator smoke test, capture logcat/batterystats baseline
-- **Phase 1 — Deps**: Go + Android updates, accompanist replacement, AAR rebuild, smoke test, CLAUDE.md refresh
-- **Phase 2 — Seam**: `TunnelListener` in Go + Kotlin, remove 60s watchdog, dead-man's switch
+- **Phase 1 — Deps**: Go + Android updates, accompanist decision, AAR rebuild, smoke test, CLAUDE.md refresh; compiler tuning: R8 keep rules for `usquebind.**`, `baseline-prof.txt`, PGO flag in `build-usque.sh`, `composeCompilerReports`, resource-shrink verification
+- **Phase 2 — Seam**: `TunnelListener` in Go + Kotlin, remove 60s watchdog, dead-man's switch; StrictMode (debug), TUN fd lifecycle audit
 - **Phase 3 — Battery verification**: before/after `dumpsys` measurements on emulator
 - **Phase 4 — Tests**: unit (seam) → Compose UI tests → instrumentation tests, run on emulator via android-cli skill
 - **Phase 5 — Manual QA plan**: written document
 - **Phase 6 — Docs**: spec + CLAUDE.md + new docs committed
 
-## 8. Deliverables
+## 9. Deliverables
 
 1. Updated deps + rebuilt AAR (JNI surface verified)
 2. `TunnelListener` seam (Go + Kotlin), watchdog removed, dead-man's switch
@@ -146,7 +204,7 @@ Current problems identified during research:
 5. Manual QA plan document
 6. Refreshed CLAUDE.md + spec committed
 
-## 9. Acceptance Criteria
+## 10. Acceptance Criteria
 
 - [ ] `go build` + `go test` pass in `usque-bind/`; AAR rebuilds; app assembles
 - [ ] JNI surface: `startTunnel`, `getStats`, `reconnect`, `setConnectivity` unchanged; `TunnelListener` + `StartTunnelWithListener` present
@@ -156,3 +214,6 @@ Current problems identified during research:
 - [ ] Manual QA plan document written
 - [ ] CLAUDE.md reflects actual versions
 - [ ] `getStats()` JSON schema verified unchanged after dep update (or Kotlin parsing updated in the same pass)
+- [ ] Battery targets met on emulator: JNI calls <100/day, wakelock <5 min/day, background CPU <60 s/day, alarms <50/day
+- [ ] R8 keep rules verified for `usquebind.**`; release build works with minification
+- [ ] Baseline profile + PGO verified in build
