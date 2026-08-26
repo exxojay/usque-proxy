@@ -91,6 +91,64 @@ type VpnProtector interface {
 	ProtectFd(fd int) bool
 }
 
+// TunnelListener receives tunnel state, stats, and error callbacks from Go.
+// Implemented in Kotlin via gomobile; callbacks arrive on arbitrary goroutines.
+type TunnelListener interface {
+	OnStateChanged(state string)
+	OnStats(stats string)
+	OnError(err string)
+}
+
+// listenerBox keeps a single concrete type in atomic.Value (Store panics on type change).
+type listenerBox struct {
+	l TunnelListener // may be nil
+}
+
+var listenerHolder atomic.Value
+
+func setListener(l TunnelListener) {
+	listenerHolder.Store(&listenerBox{l: l})
+}
+
+func getListener() TunnelListener {
+	v := listenerHolder.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(*listenerBox).l
+}
+
+// safeNotify guards against a panicking Kotlin listener (gomobile callback
+// threading risk) — a Java exception must not kill the tunnel goroutine.
+func safeNotify(fn func()) {
+	defer func() { recover() }()
+	fn()
+}
+
+func notifyState(state string) {
+	safeNotify(func() {
+		if l := getListener(); l != nil {
+			l.OnStateChanged(state)
+		}
+	})
+}
+
+func notifyStats() {
+	safeNotify(func() {
+		if l := getListener(); l != nil {
+			l.OnStats(GetStats())
+		}
+	})
+}
+
+func notifyError(err string) {
+	safeNotify(func() {
+		if l := getListener(); l != nil {
+			l.OnError(err)
+		}
+	})
+}
+
 // FdAdapter wraps an OS file descriptor (from Android's VpnService TUN) to
 // satisfy usque's api.TunnelDevice interface.
 type FdAdapter struct {
@@ -134,7 +192,7 @@ var (
 
 // StartTunnel starts the MASQUE tunnel. Blocks until StopTunnel or error.
 // If a previous tunnel is still winding down, waits up to 5s for it to finish.
-func StartTunnel(configJSON string, tunFd int, protector VpnProtector) error {
+func StartTunnel(configJSON string, tunFd int, protector VpnProtector, listener TunnelListener) error {
 	mu.Lock()
 	if running.Load() {
 		d := done
@@ -178,11 +236,15 @@ func StartTunnel(configJSON string, tunFd int, protector VpnProtector) error {
 	rxBytes.Store(0)
 	mu.Unlock()
 
+	setListener(listener)
+	defer setListener(nil)
+
 	tunFile := os.NewFile(uintptr(tunFd), "tun")
 	device := &FdAdapter{file: tunFile}
 
 	err := maintainTunnel(ctx, &tcfg, device, protector)
 	running.Store(false)
+	notifyState("stopped")
 	close(done)
 	return err
 }
@@ -438,6 +500,23 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 	var waitForTraffic bool   // after error disconnect, wait for outbound traffic before reconnecting
 	var forcedReconnect bool  // true when reconnect was explicitly requested (skip backoff delay)
 
+	// Stats ticker: one notifyStats() per ~5 min while connected. Created once
+	// (not per reconnect iteration) so reconnect cycles don't stack goroutines.
+	statsTicker := time.NewTicker(5 * time.Minute)
+	defer statsTicker.Stop()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-statsTicker.C:
+				if connected.Load() {
+					notifyStats()
+				}
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -491,6 +570,7 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 			cert, err := selfSignedCert(privKey)
 			if err != nil {
 				lastError.Store(err.Error())
+				notifyError(err.Error())
 				log.Printf("cert generation: %v", err)
 				sleepCtx(ctx, reconnectDelay)
 				continue
@@ -502,6 +582,7 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 		tlsCfg, err := api.PrepareTlsConfig(privKey, peerPubKey, cachedCert, cfg.sni(), false)
 		if err != nil {
 			lastError.Store(err.Error())
+			notifyError(err.Error())
 			log.Printf("TLS config: %v", err)
 			sleepCtx(ctx, reconnectDelay)
 			continue
@@ -510,6 +591,7 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 		tlsCfg.ClientSessionCache = quicSessionCache // 1-RTT session resumption (not 0-RTT)
 
 		connectCount.Add(1)
+		notifyState("connecting")
 		var udpConn *net.UDPConn
 		var tr *http3.Transport
 		var ipConn *connectip.Conn
@@ -547,6 +629,7 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 
 		if err != nil {
 			lastError.Store(err.Error())
+			notifyError(err.Error())
 			log.Printf("connect: %v", err)
 			if !hasNetwork.Load() {
 				log.Println("no network — waiting for connectivity")
@@ -558,6 +641,7 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 		}
 		if rsp.StatusCode != 200 {
 			lastError.Store(fmt.Sprintf("tunnel rejected: %s", rsp.Status))
+			notifyError(fmt.Sprintf("tunnel rejected: %s", rsp.Status))
 			log.Printf("tunnel rejected: %s", rsp.Status)
 			cleanup(ipConn, udpConn, tr)
 			sleepCtx(ctx, reconnectDelay)
@@ -568,6 +652,8 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 		connectedAt.Store(time.Now().UnixMilli())
 		lastError.Store("")
 		log.Println("Connected to MASQUE server")
+		notifyState("connected")
+		notifyStats()
 
 		errChan := make(chan error, 2)
 		var wg sync.WaitGroup
@@ -579,12 +665,14 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 		select {
 		case err = <-errChan:
 			connected.Store(false)
+			notifyState("disconnected")
 			connectedAt.Store(0)
 			lastError.Store(err.Error())
 			log.Printf("tunnel lost: %v", err)
 			waitForTraffic = true // wait for outbound traffic before reconnecting
 		case <-reconnectCh:
 			connected.Store(false)
+			notifyState("disconnected")
 			connectedAt.Store(0)
 			log.Println("reconnect requested")
 			waitForTraffic = false
@@ -596,6 +684,7 @@ func maintainTunnel(ctx context.Context, cfg *tunnelConfig, device api.TunnelDev
 			}
 		case <-ctx.Done():
 			connected.Store(false)
+			notifyState("disconnected")
 			connectedAt.Store(0)
 		}
 
@@ -853,6 +942,18 @@ func connectTunnelProtectedH2(
 	return ipConn, rsp, nil
 }
 
+// isDNSQuery reports whether pkt looks like a DNS query (QR=0, opcode=0, QDCOUNT>=1).
+// isDNSQuery reports whether pkt looks like a DNS query (QR=0, opcode=0, QDCOUNT>=1).
+func isDNSQuery(pkt []byte) bool {
+	if len(pkt) < 12 {
+		return false
+	}
+	flags := uint16(pkt[2])<<8 | uint16(pkt[3])
+	qr := flags >> 15
+	opcode := (flags >> 11) & 0xF
+	qdcount := uint16(pkt[4])<<8 | uint16(pkt[5])
+	return qr == 0 && opcode == 0 && qdcount >= 1
+}
 func forwardUp(device api.TunnelDevice, ipConn *connectip.Conn, pool *api.NetBuffer, errChan chan<- error, dns *dnsInterceptor, dnsCache *tunnelDnsCache) {
 	for {
 		buf := pool.Get()
@@ -866,7 +967,7 @@ func forwardUp(device api.TunnelDevice, ipConn *connectip.Conn, pool *api.NetBuf
 		txBytes.Add(int64(n))
 
 		// Intercept DNS packets (IPv4 and IPv6)
-		if srcIP, srcPort, dstIP, query, isIPv6, ok := detectDNSQuery(pkt); ok {
+		if srcIP, srcPort, dstIP, query, isIPv6, ok := detectDNSQuery(pkt); ok && isDNSQuery(query) {
 			if dns != nil {
 				bufPtr := dnsQueryPool.Get().(*[]byte)
 				queryCopy := append((*bufPtr)[:0], query...)
