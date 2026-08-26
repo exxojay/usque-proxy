@@ -13,7 +13,11 @@ import com.nhubaotruong.usqueproxy.data.SplitMode
 import com.nhubaotruong.usqueproxy.data.ThemeMode
 import com.nhubaotruong.usqueproxy.data.VpnPreferences
 import com.nhubaotruong.usqueproxy.data.VpnPrefs
+import com.nhubaotruong.usqueproxy.vpn.TunnelStateHolder
+import com.nhubaotruong.usqueproxy.vpn.TunnelStats
 import com.nhubaotruong.usqueproxy.vpn.UsqueVpnService
+import com.nhubaotruong.usqueproxy.vpn.VpnServiceEvent
+import com.nhubaotruong.usqueproxy.vpn.parseTunnelStats
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,15 +26,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import usquebind.Usquebind
 
 enum class VpnState { DISCONNECTED, CONNECTING, CONNECTED }
-
-data class TunnelStats(
-    val txBytes: Long = 0,
-    val rxBytes: Long = 0,
-)
 
 class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -40,24 +38,30 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Collect VPN service events for instant state updates (no polling needed).
         viewModelScope.launch {
-            UsqueVpnService.events.collect { event ->
+            TunnelStateHolder.events.collect { event ->
                 when (event) {
-                    is UsqueVpnService.Companion.VpnServiceEvent.Connecting -> {
+                    is VpnServiceEvent.Connecting -> {
                         _vpnState.value = VpnState.CONNECTING
                     }
-                    is UsqueVpnService.Companion.VpnServiceEvent.Started -> {
+                    is VpnServiceEvent.Started -> {
                         _vpnState.value = VpnState.CONNECTED
                     }
-                    is UsqueVpnService.Companion.VpnServiceEvent.Disconnecting -> {
+                    is VpnServiceEvent.Disconnecting -> {
                         // Keep current state — avoid UI flicker during brief disconnect
                     }
-                    is UsqueVpnService.Companion.VpnServiceEvent.Stopped -> {
+                    is VpnServiceEvent.Stopped -> {
                         _vpnState.value = VpnState.DISCONNECTED
                         _connectedSince.value = null
                         _needsRestart.value = false
                     }
-                    is UsqueVpnService.Companion.VpnServiceEvent.Error -> {
+                    is VpnServiceEvent.Error -> {
                         _tunnelError.value = event.message
+                    }
+                    is VpnServiceEvent.Stats -> {
+                        _stats.value = event.stats
+                        if (_connectedSince.value == null && event.stats.uptimeSec > 0) {
+                            _connectedSince.value = System.currentTimeMillis() - event.stats.uptimeSec * 1000L
+                        }
                     }
                 }
             }
@@ -99,35 +103,31 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Called from composable LaunchedEffect — checks volatile booleans, no JNI. */
     fun refreshState() {
-        val running = UsqueVpnService.isRunning
+        val running = TunnelStateHolder.isRunning
         _vpnState.value = if (running) VpnState.CONNECTED else VpnState.DISCONNECTED
         if (!running) {
             _needsRestart.value = false
             _connectedSince.value = null
         }
-        val error = UsqueVpnService.lastError
-        if (error != null) { _tunnelError.value = error; UsqueVpnService.clearError() }
+        val error = TunnelStateHolder.lastError
+        if (error != null) { _tunnelError.value = error; TunnelStateHolder.clearError() }
     }
 
     /** Called from composable LaunchedEffect — JNI getStats(), only when stats are visible. */
     suspend fun refreshStats() {
-        val json = withContext(Dispatchers.IO) {
-            JSONObject(Usquebind.getStats())
+        val stats = withContext(Dispatchers.IO) {
+            parseTunnelStats(Usquebind.getStats())
         }
-        _stats.value = TunnelStats(
-            txBytes = json.optLong("tx_bytes", 0L),
-            rxBytes = json.optLong("rx_bytes", 0L),
-        )
-        if (_connectedSince.value == null) {
-            val uptimeSec = json.optInt("uptime_sec", 0)
-            _connectedSince.value = System.currentTimeMillis() - uptimeSec * 1000L
+        _stats.value = stats
+        if (_connectedSince.value == null && stats.uptimeSec > 0) {
+            _connectedSince.value = System.currentTimeMillis() - stats.uptimeSec * 1000L
         }
     }
 
     fun connect() {
         if (_vpnState.value != VpnState.DISCONNECTED) return
         _vpnState.value = VpnState.CONNECTING
-        UsqueVpnService.clearError()
+        TunnelStateHolder.clearError()
 
         val ctx = getApplication<Application>()
         val intent = Intent(ctx, UsqueVpnService::class.java)
@@ -148,7 +148,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     fun restartVpn() {
         _vpnState.value = VpnState.CONNECTING
         _needsRestart.value = false
-        UsqueVpnService.clearError()
+        TunnelStateHolder.clearError()
         val ctx = getApplication<Application>()
         val intent = Intent(ctx, UsqueVpnService::class.java).apply {
             action = UsqueVpnService.ACTION_RESTART
@@ -157,7 +157,7 @@ class VpnViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun markRestartNeeded() {
-        if (UsqueVpnService.isRunning) {
+        if (TunnelStateHolder.isRunning) {
             _needsRestart.value = true
         }
     }

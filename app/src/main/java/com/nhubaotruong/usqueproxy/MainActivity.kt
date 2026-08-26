@@ -17,6 +17,7 @@ import com.nhubaotruong.usqueproxy.data.ThemeMode
 import com.nhubaotruong.usqueproxy.ui.nav.AppNavigation
 import com.nhubaotruong.usqueproxy.ui.theme.UsqueProxyTheme
 import com.nhubaotruong.usqueproxy.ui.viewmodel.VpnViewModel
+import com.nhubaotruong.usqueproxy.vpn.TunnelStateHolder
 import com.nhubaotruong.usqueproxy.vpn.UsqueVpnService
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -66,7 +67,7 @@ class MainActivity : ComponentActivity() {
         handleConnectAction(intent)
 
         // Auto-connect on app start if enabled
-        if (intent?.action != ACTION_CONNECT_VPN && !UsqueVpnService.isRunning) {
+        if (intent?.action != ACTION_CONNECT_VPN && !TunnelStateHolder.isRunning) {
             lifecycleScope.launch {
                 val prefs = vpnViewModel.vpnPrefs.first { it.isActiveRegistered || !it.autoConnect }
                 if (prefs.autoConnect && prefs.isActiveRegistered && prefs.activeConfigJson.isNotEmpty()) {
