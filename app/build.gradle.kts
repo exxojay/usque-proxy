@@ -49,6 +49,13 @@ android {
                 "proguard-rules.pro"
             )
         }
+
+        debug {
+            // x86_64 needed for emulator testing (host is x86_64); release stays arm64-only
+            ndk {
+                abiFilters += "x86_64"
+            }
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
