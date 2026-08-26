@@ -52,7 +52,7 @@ An Android VPN app (usque-proxy) that tunnels traffic through Cloudflare's MASQU
 - `github.com/quic-go/quic-go v0.60.0` - QUIC transport (Go), used for MASQUE tunnel and DoQ DNS
 - `gvisor.dev/gvisor v0.0.0-20260826181857-eb77d6c8310a` - Userspace networking stack for the TUN device
 - `golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446` - WireGuard networking primitives
-- `usquebind.aar` (local `app/libs/`) - Pre-built gomobile AAR providing `usquebind.Usquebind` and `usquebind.VpnProtector` to Kotlin
+- `usquebind.aar` (local `app/libs/`) - Pre-built gomobile AAR providing `usquebind.Usquebind`, `usquebind.VpnProtector`, and `usquebind.TunnelListener` to Kotlin
 - `androidx.datastore:datastore-preferences 1.2.1` - Persistent settings storage
 - `com.google.accompanist:accompanist-drawablepainter 0.37.3` - Drawable rendering in Compose
 - `androidx.compose.material:material-icons-extended` - Extended icon set
