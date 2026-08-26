@@ -232,14 +232,14 @@ Current problems identified during research:
 
 ## 10. Acceptance Criteria
 
-- [ ] `go build` + `go test` pass in `usque-bind/`; AAR rebuilds; app assembles
-- [ ] JNI surface refactored: `startTunnel(config, fd, protector, listener)`; `getStats`/`reconnect`/`setConnectivity` present as needed; Kotlin call sites updated
-- [ ] No 60s polling in logcat; dead-man's switch fires only at its long interval
-- [ ] Before/after `dumpsys` shows reduced wakeup/alarm/JNI activity
-- [ ] Compose UI tests + instrumentation tests pass on emulator
-- [ ] Manual QA plan document written
-- [ ] CLAUDE.md reflects actual versions
-- [ ] `getStats()` JSON schema verified unchanged after dep update (or Kotlin parsing updated in the same pass)
-- [ ] Battery targets met on emulator: JNI calls <100/day, wakelock <5 min/day, background CPU <60 s/day, alarms <50/day
-- [ ] R8 keep rules verified for `usquebind.**`; release build works with minification
-- [ ] Baseline profile + PGO verified in build
+- [x] `go build` + `go test` pass in `usque-bind/`; AAR rebuilds; app assembles
+- [x] JNI surface refactored: `startTunnel(config, fd, protector, listener)`; `getStats`/`reconnect`/`setConnectivity` present as needed; Kotlin call sites updated
+- [x] No 60s polling in logcat; dead-man's switch fires only at its long interval
+- [x] Before/after `dumpsys` shows reduced wakeup/alarm/JNI activity
+- [x] Compose UI tests + instrumentation tests pass on emulator
+- [x] Manual QA plan document written
+- [x] CLAUDE.md reflects actual versions
+- [x] `getStats()` JSON schema verified unchanged after dep update (or Kotlin parsing updated in the same pass)
+- [ ] Battery targets met on emulator: JNI calls <100/day, wakelock <5 min/day, background CPU <60 s/day, alarms <50/day — deferred to real-device manual QA (JNI 0/day and alarms 0/day measured; wakelock duration and background CPU not measurable on emulator)
+- [x] R8 keep rules verified for `usquebind.**`; release build works with minification
+- [x] Baseline profile + PGO verified in build
