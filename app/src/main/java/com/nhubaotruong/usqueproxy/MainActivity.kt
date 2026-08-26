@@ -3,6 +3,7 @@ package com.nhubaotruong.usqueproxy
 import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
+import android.os.StrictMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -39,6 +40,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build()
+            )
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder().detectAll().penaltyLog().build()
+            )
+        }
         setContent {
             val prefs by vpnViewModel.vpnPrefs.collectAsStateWithLifecycle()
             val darkTheme = when (prefs.themeMode) {
