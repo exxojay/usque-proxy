@@ -104,6 +104,10 @@
 - [ ] **Step 1: Update direct deps**
   Run: `cd usque-bind && go get github.com/Diniboy1123/usque@master github.com/Diniboy1123/connect-ip-go@master github.com/quic-go/quic-go@latest golang.org/x/mobile@latest golang.org/x/net@latest gvisor.dev/gvisor@latest golang.zx2c4.com/wireguard@latest && go mod tidy`
 
+- [ ] **Step 1b: Reinstall gomobile to match the updated module**
+  Run: `cd usque-bind && go install golang.org/x/mobile/cmd/gomobile@latest`
+  Expected: `gomobile` binary on PATH matches the new `golang.org/x/mobile` version (otherwise `build-usque.sh` may produce a broken AAR).
+
 - [ ] **Step 2: Build — quic-go migration gate**
   Run: `cd usque-bind && go build ./...`
   Expected: PASS. If quic-go broke the API, pin back: `go get github.com/quic-go/quic-go@v0.59.0`, document why in the commit message, and continue.
@@ -336,18 +340,15 @@
       OnError(err string)
   }
 
-  // listenerHolder is goroutine-safe storage for the active listener.
-  var listenerHolder atomic.Value // TunnelListener or nil
+  // listenerBox keeps a single concrete type in atomic.Value (Store panics on type change).
+  type listenerBox struct {
+      l TunnelListener // may be nil
+  }
 
-  // tunnelListenerNil is a typed nil so atomic.Value never stores an untyped nil.
-  type tunnelListenerNil struct{}
+  var listenerHolder atomic.Value
 
   func setListener(l TunnelListener) {
-      if l == nil {
-          listenerHolder.Store((*tunnelListenerNil)(nil))
-          return
-      }
-      listenerHolder.Store(l)
+      listenerHolder.Store(&listenerBox{l: l})
   }
 
   func getListener() TunnelListener {
@@ -355,28 +356,38 @@
       if v == nil {
           return nil
       }
-      if _, ok := v.(*tunnelListenerNil); ok {
-          return nil
-      }
-      return v.(TunnelListener)
+      return v.(*listenerBox).l
+  }
+
+  // safeNotify guards against a panicking Kotlin listener (gomobile callback
+  // threading risk) — a Java exception must not kill the tunnel goroutine.
+  func safeNotify(fn func()) {
+      defer func() { recover() }()
+      fn()
   }
 
   func notifyState(state string) {
-      if l := getListener(); l != nil {
-          l.OnStateChanged(state)
-      }
+      safeNotify(func() {
+          if l := getListener(); l != nil {
+              l.OnStateChanged(state)
+          }
+      })
   }
 
   func notifyStats() {
-      if l := getListener(); l != nil {
-          l.OnStats(GetStats())
-      }
+      safeNotify(func() {
+          if l := getListener(); l != nil {
+              l.OnStats(GetStats())
+          }
+      })
   }
 
   func notifyError(err string) {
-      if l := getListener(); l != nil {
-          l.OnError(err)
-      }
+      safeNotify(func() {
+          if l := getListener(); l != nil {
+              l.OnError(err)
+          }
+      })
   }
   ```
 
@@ -413,7 +424,9 @@
           case <-ctx.Done():
               return
           case <-statsTicker.C:
-              notifyStats()
+              if connected.Load() {
+                  notifyStats()
+              }
           }
       }
   }()
@@ -713,6 +726,10 @@
               notification.showConnected()
           }
           "disconnected" -> TunnelStateHolder.emit(VpnServiceEvent.Disconnecting)
+          "stopped" -> {
+              TunnelStateHolder.emit(VpnServiceEvent.Stopped)
+              notification.cancel()
+          }
       }
   }
 
@@ -752,6 +769,8 @@
 
   with constants `DEAD_MANS_INTERVAL_MS = 15 * 60_000L`, `DEAD_MANS_POWER_SAVE_MS = 60 * 60_000L`, and `powerSave` updated by `PowerStateWatcher`.
   - Replace companion statics with `TunnelStateHolder` (keep `ACTION_STOP`/`ACTION_RESTART`/`ACTION_KEEPALIVE_ALARM` constants in the companion).
+
+  - **Set `TunnelStateHolder.isRunning` explicitly**: `= true` in `onStartCommand` before launching the tunnel job; `= false` in `stopVpnInternal`/`onDestroy` after `Usquebind.stopTunnel()`. The dead-man's switch and UI both read it — if never set, the switch never health-checks.
   - Wire `NetworkWatcher` `onNetworkChanged` → `Usquebind.setConnectivity(available)` (on IO dispatcher).
   - Wire `PowerStateWatcher` `onPowerSaveChanged` → update `powerSave` flag.
   - Use `TunnelConfigBuilder.build(prefs)` in `startVpn`; call `Usquebind.startTunnel(config, fd, protector, this)`.
@@ -882,7 +901,7 @@
   }
   ```
 
-  (Check `VpnPrefs`'s actual property names in `data/VpnPreferences.kt` and adjust — `warpConfigJson`, `activeProfile`, `customSni`, `useHttp2` are the expected names.)
+  (Verified: `VpnPrefs` IS a `data class` in `data/VpnPreferences.kt` line 17 — `.copy()` works. Property names to confirm against the real file: `warpConfigJson`, `activeProfile`, `customSni`, `useHttp2`.)
 
 - [ ] **Step 3: Write ListenerEventMapperTest**
   The service's `onStateChanged`/`onError` mapping is a pure switch — extract it into a small mapper in `vpn/ListenerEventMapper.kt`:
@@ -895,6 +914,7 @@
           "connecting" -> VpnServiceEvent.Connecting
           "connected" -> VpnServiceEvent.Started
           "disconnected" -> VpnServiceEvent.Disconnecting
+          "stopped" -> VpnServiceEvent.Stopped
           else -> null
       }
 
@@ -1057,7 +1077,7 @@
   }
   ```
 
-  (The service must emit `Connecting` synchronously in `onStartCommand` before the tunnel job blocks — verify the service does this; if the VPN permission dialog interferes, grant via `adb shell appops` or accept the dialog in the test.)
+  (The service must emit `Connecting` synchronously in `onStartCommand` before the tunnel job blocks — verify the service does this. VPN consent: pre-grant with `adb shell appops set com.nhubaotruong.usqueproxy ACTIVATE_VPN allow`; if the dialog still appears on API 35+, click it via `UiAutomation` (`device.findObject(By.text("Allow"))`) in the test, or skip the test if consent cannot be automated.)
 
 - [ ] **Step 2: Write DozeTest**
 
