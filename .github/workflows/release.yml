@@ -67,7 +67,7 @@ jobs:
         run: ./gradlew assembleRelease
 
       - name: Rename APK
-        run: mv app/build/outputs/apk/release/*.apk app/build/outputs/apk/release/UsqueProxy-${GITHUB_REF_NAME}-arm64-v8a.apk
+        run: mv app/build/outputs/apk/release/*.apk "app/build/outputs/apk/release/UsqueProxy-${GITHUB_REF_NAME}-arm64-v8a.apk"
 
       - name: Upload APK to GitHub Release
         uses: softprops/action-gh-release@v3
