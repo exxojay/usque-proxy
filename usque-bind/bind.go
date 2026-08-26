@@ -278,7 +278,7 @@ func RegisterWithJWT(jwt string) (string, error) {
 
 // enrollAndBuildConfig generates a key pair, enrolls it with the API, and
 // returns the serialized config JSON.
-func enrollAndBuildConfig(accountData models.AccountData, license string) (string, error) {
+func enrollAndBuildConfig(accountData *models.AccountData, license string) (string, error) {
 	privKeyDER, updatedAccount, err := generateAndEnroll(accountData)
 	if err != nil {
 		return "", err
@@ -288,9 +288,16 @@ func enrollAndBuildConfig(accountData models.AccountData, license string) (strin
 		PrivateKey:  base64.StdEncoding.EncodeToString(privKeyDER),
 		ID:          accountData.ID,
 		AccessToken: accountData.Token,
-		License:     license,
 	}
 	applyAccountToConfig(&cfg, updatedAccount)
+
+	// License is bound to the account server-side: config.Config.License was
+	// removed upstream in favor of api.UpdateLicenceKey.
+	if license != "" {
+		if err := api.UpdateLicenceKey(accountData.ID, accountData.Token, license); err != nil {
+			return "", fmt.Errorf("license update failed: %w", err)
+		}
+	}
 
 	result, err := json.Marshal(cfg)
 	if err != nil {
@@ -312,7 +319,7 @@ func Enroll(configJSON string) (string, error) {
 	}
 
 	accountData := models.AccountData{ID: cfg.ID, Token: cfg.AccessToken}
-	privKeyDER, updatedAccount, err := generateAndEnroll(accountData)
+	privKeyDER, updatedAccount, err := generateAndEnroll(&accountData)
 	if err != nil {
 		return "", err
 	}
@@ -328,7 +335,7 @@ func Enroll(configJSON string) (string, error) {
 }
 
 // generateAndEnroll creates a new EC key pair and enrolls it with the API.
-func generateAndEnroll(accountData models.AccountData) (privKeyDER []byte, updatedAccount *models.AccountData, err error) {
+func generateAndEnroll(accountData *models.AccountData) (privKeyDER []byte, updatedAccount *models.AccountData, err error) {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("key generation failed: %w", err)
@@ -342,14 +349,11 @@ func generateAndEnroll(accountData models.AccountData) (privKeyDER []byte, updat
 		return nil, nil, fmt.Errorf("public key marshal failed: %w", err)
 	}
 
-	updated, apiErr, err := api.EnrollKey(accountData, pubKeyPKIX, "UsqueProxy")
+	updated, err := api.EnrollKey(accountData.ID, accountData.Token, pubKeyPKIX, "UsqueProxy")
 	if err != nil {
-		if apiErr != nil {
-			return nil, nil, fmt.Errorf("enrollment failed: %s", apiErr.ErrorsAsString("; "))
-		}
 		return nil, nil, fmt.Errorf("enrollment failed: %w", err)
 	}
-	return privKeyDER, &updated, nil
+	return privKeyDER, updated, nil
 }
 
 // applyAccountToConfig updates a config with peer endpoints and addresses from the API response.

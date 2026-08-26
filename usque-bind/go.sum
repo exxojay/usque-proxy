@@ -1,7 +1,7 @@
 github.com/Diniboy1123/connect-ip-go v0.0.0-20260613064811-66cba32d7d33 h1:HHEVWeNlF1ytUyi4xH+K0yVrkAwCOBAz2WvriKbs7HQ=
 github.com/Diniboy1123/connect-ip-go v0.0.0-20260613064811-66cba32d7d33/go.mod h1:wi7UWeMy3b9dwZZeMcJjgZfjmmJn4z+ulsfdljz+Y/E=
-github.com/Diniboy1123/usque v1.5.1-0.20260617155134-8b47f8f3c5bd h1:iDsB/+meUDQxb6Et0HXtHTHDzmygG5JjyC4eFcFehj8=
-github.com/Diniboy1123/usque v1.5.1-0.20260617155134-8b47f8f3c5bd/go.mod h1:qT7nyPjjJUtJzha5ktJhXGqqW47Gn6UylbjuHygdSuM=
+github.com/Diniboy1123/usque v1.5.1-0.20260720063354-6aa03fc97d12 h1:Y+ighsjCgrZ60S9aUegJU2q7mLyklIJquG3E+aYKeVg=
+github.com/Diniboy1123/usque v1.5.1-0.20260720063354-6aa03fc97d12/go.mod h1:qT7nyPjjJUtJzha5ktJhXGqqW47Gn6UylbjuHygdSuM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dunglas/httpsfv v1.1.0 h1:Jw76nAyKWKZKFrpMMcL76y35tOpYHqQPzHQiwDvpe54=
