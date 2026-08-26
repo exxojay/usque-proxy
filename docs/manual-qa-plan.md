@@ -99,7 +99,7 @@ adb shell dumpsys batterystats --checkin | grep UsqueProxy
 
 ### LC-2 Process killed by OOM killer → START_STICKY restore
 
-- **Steps:** Connect. Kill the process without stopping the service: `adb shell am kill com.nhubaotruong.usqueproxy` (or use `adb shell am crash`). Wait 10 s.
+- **Steps:** Connect. Kill the process without stopping the service: `adb shell am crash com.nhubaotruong.usqueproxy` (preferred — `am kill` only targets background processes, and a process hosting a foreground service is exempt, so it would not exercise START_STICKY). Wait 10 s.
 - **Expected:** The foreground service restarts (START_STICKY); tunnel reconnects; notification returns. App UI, when opened, shows connected state without crashing (regression guard for the Task 10 NPE fix).
 - [ ] PASS / [ ] FAIL — Notes:
 
@@ -135,8 +135,8 @@ adb shell dumpsys batterystats --checkin | grep UsqueProxy
 
 ### LC-8 100 connect/disconnect cycles
 
-- **Steps:** Script or manually cycle Connect/Disconnect 100 times (e.g. via the QS tile or `adb shell am start -a com.nhubaotruong.usqueproxy.ACTION_STOP` / the app button). After the last cycle, run the wakelock audit (BA-3) and check for ANRs: `adb logcat -d | grep -i anr`.
-- **Expected:** No ANR, no crash, no fd leak (`/proc/<pid>/fd` count stable), no wakelock accumulation, no notification desync.
+- **Steps:** Script or manually cycle Connect/Disconnect 100 times via the QS tile toggle (or the app button). Do not use `adb shell am startservice` — the service is `exported="false"` with `BIND_VPN_SERVICE`, so external start/stop intents are denied. After the last cycle, run the wakelock audit (BA-3) and check for ANRs: `adb logcat -d | grep -i anr`.
+- **Expected:** No ANR, no crash, no fd leak, no wakelock accumulation, no notification desync. Check fd count before and after the cycles: `adb shell pidof com.nhubaotruong.usqueproxy`, then `adb shell ls /proc/<pid>/fd | wc -l` — the count must be stable (within noise).
 - [ ] PASS / [ ] FAIL — Notes:
 
 ---
@@ -233,8 +233,8 @@ adb shell dumpsys batterystats --checkin | grep UsqueProxy
 
 ### BA-1 Drain: idle < 2% / active < 5% per day
 
-- **Steps:** Charge to 100%, disconnect charger, connect the tunnel, screen off, leave idle for 1 h (Doze engaged). Record battery level. Then use the device normally (screen on, browsing through the tunnel) for 1 h and record again. Extrapolate to 24 h.
-- **Expected:** < 2% per idle hour-equivalent day; < 5% per active day. Record raw numbers.
+- **Steps:** Charge to 100%, disconnect charger, connect the tunnel, screen off, leave idle overnight (≥ 8 h, Doze engaged — a 1 h window extrapolated to 24 h is too noisy at 1% battery granularity). Record battery level at start and end. Then use the device normally (screen on, browsing through the tunnel) for 1 h and record again. Extrapolate to 24 h.
+- **Expected:** < 2%/day idle; < 5%/day active. Record raw numbers.
 - [ ] PASS / [ ] FAIL — Notes:
 
 ### BA-2 Wakelock duration < 5 min/day; background CPU < 60 s/day
