@@ -39,7 +39,7 @@ Current problems identified during research:
 - `golang.org/x/mobile` (gomobile) → newest commit
 - `gvisor.dev/gvisor`, `golang.zx2c4.com/wireguard`, `golang.org/x/net` → latest stable/commit as applicable
 - Indirect deps follow `go get -u` resolution
-- **JNI surface verified unchanged** after rebuild (`startTunnel`, `getStats`, `reconnect`, `setConnectivity`, register functions)
+- **JNI surface refactored freely** — no compatibility constraint (user mandate): `startTunnel` gains a `TunnelListener` parameter; `getStats`, `reconnect`, `setConnectivity` refactored as needed; Kotlin call sites updated in the same pass
 - **quic-go migration risk**: quic-go makes breaking API changes between minor versions. After updating, run `go build` in `usque-bind/` first — if it fails, pin quic-go back to v0.59.0 and document why
 - **CI gomobile pin**: `.github/workflows/release.yml` hardcodes gomobile at `v0.0.0-20260410095206-2cfb76559b7b` — update it to match the new `golang.org/x/mobile` version in go.mod
 
@@ -68,7 +68,7 @@ Current problems identified during research:
   ```
 
   gomobile generates `usquebind.TunnelListener` for Kotlin.
-- New entry point `StartTunnelWithListener(config, fd, protector, listener)` — **existing 3-arg `startTunnel` kept intact** (gomobile cannot overload; second function name preserves the JNI contract).
+- **`StartTunnel` signature changed directly** to `StartTunnel(config, fd, protector, listener)` — no legacy, no compatibility constraint (user mandate); the single Kotlin call site is updated in the same pass
 - Go calls back on: connect/disconnect state changes, fatal errors, and a periodic stats tick (~5 min while connected). `getStats()` remains for on-demand queries.
 - Callback threading: same path as existing `VpnProtector.ProtectFd` (Go goroutine → Java) — proven in this codebase. Listener holder must be goroutine-safe.
 
@@ -76,7 +76,26 @@ Current problems identified during research:
 
 - Implement `TunnelListener` → map callbacks to `_events.tryEmit(...)` (thread-safe) + notification updates.
 - **Delete the 60s watchdog loop**; replace with a dead-man's switch: one coroutine sleeping 15–30 min (60 min in power-save), single `getStats()` check, no-op if healthy, trigger reconnect if Go went silent. ~1440 JNI wakes/day → ~48–96/day.
-- Network callbacks, Doze handling, wake locks: unchanged (already event-driven and bounded).
+- Network callbacks, Doze handling, wake locks: kept event-driven and bounded; refactored into dedicated helpers where it improves testability
+
+### Refactor scope (user mandate: no legacy, no compatibility)
+
+**Go (`usque-bind/bind.go`):**
+- Add `TunnelListener` interface (`OnStateChanged`, `OnStats`, `OnError`)
+- Change `StartTunnel` signature to accept `listener TunnelListener` directly
+- Add callback points in the tunnel loop: on connect, on disconnect, on fatal error, periodic stats tick (~5 min)
+- Keep `getStats()` for on-demand UI refresh; keep `reconnect()`, `setConnectivity()` (refactor freely if needed)
+- Keep `waitForNetwork` (already event-driven), `KeepAlivePeriod: 30s` (deliberate tradeoff)
+
+**Kotlin (`UsqueVpnService.kt` — 846 lines, split it):**
+- Delete `startWatchdog()` entirely (the 60s polling loop)
+- Implement `TunnelListener` → map callbacks to `_events.tryEmit()` + notification updates
+- Add a dead-man's switch: one coroutine, 15–30 min sleep (60 min power-save), single `getStats()` check
+- Extract `startVpn` config assembly into a `TunnelConfigBuilder` — pure function, testable
+- Extract notification management into a `VpnNotification` helper
+- Extract network callback registration into a `NetworkWatcher`
+- Extract Doze/power-save receiver into a `PowerStateWatcher`
+- Move companion object statics (`isRunning`, `lastError`, `events`) into a state holder — improves testability
 
 ### Risks
 
@@ -197,7 +216,7 @@ Current problems identified during research:
 
 ## 9. Deliverables
 
-1. Updated deps + rebuilt AAR (JNI surface verified)
+1. Updated deps + rebuilt AAR (JNI surface refactored: `startTunnel` takes `TunnelListener`)
 2. `TunnelListener` seam (Go + Kotlin), watchdog removed, dead-man's switch
 3. Battery improvements with measured before/after evidence
 4. Test suite: unit (seam), Compose UI, instrumentation
@@ -207,7 +226,7 @@ Current problems identified during research:
 ## 10. Acceptance Criteria
 
 - [ ] `go build` + `go test` pass in `usque-bind/`; AAR rebuilds; app assembles
-- [ ] JNI surface: `startTunnel`, `getStats`, `reconnect`, `setConnectivity` unchanged; `TunnelListener` + `StartTunnelWithListener` present
+- [ ] JNI surface refactored: `startTunnel(config, fd, protector, listener)`; `getStats`/`reconnect`/`setConnectivity` present as needed; Kotlin call sites updated
 - [ ] No 60s polling in logcat; dead-man's switch fires only at its long interval
 - [ ] Before/after `dumpsys` shows reduced wakeup/alarm/JNI activity
 - [ ] Compose UI tests + instrumentation tests pass on emulator
